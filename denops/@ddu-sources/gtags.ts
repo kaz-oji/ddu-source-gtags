@@ -8,6 +8,12 @@ import { TextProtoReader } from "https://deno.land/std@0.136.0/textproto/mod.ts"
 
 const enqueueSize1st = 1000;
 
+type Params = {
+    args: string;
+    input: string;
+    path: string;
+};
+
 async function* iterLine(r: Deno.Reader): AsyncIterable<string> {
     const reader = new TextProtoReader(BufReader.create(r));
     while (true) {
@@ -57,69 +63,72 @@ export class Source extends BaseSource<Params> {
                     ? args.input
                     : args.sourceParams.input;
 
-                    if (input == "") {
-                        controller.close();
-                        return;
-                    }
+                if (input == "" && args.sourceParams.args != "-u") {
+                    controller.close();
+                    return;
+                }
 
-                    const cmd = ["global", ...args.sourceParams.args, input];
-                    const cwd = args.sourceParams.path != ""
-                        ? args.sourceParams.path
-                        : await fn.getcwd(args.denops) as string;
+                const cmd = (args.sourceParams.args == "-u")
+                    ? ["global", args.sourceParams.args]
+                    : ["global", "--result=ctags-mod", args.sourceParams.args, input];
 
-                        let items: Item<ActionData>[] = [];
-                        const enqueueSize2nd = 100000;
-                        let enqueueSize = enqueueSize1st;
-                        let numChunks = 0;
+                const cwd = (args.sourceParams.path != "")
+                    ? args.sourceParams.path
+                    : await fn.getcwd(args.denops) as string;
 
-                        const proc = Deno.run({
-                            cmd: cmd,
-                            stdout: "piped",
-                            stderr: "piped",
-                            stdin: "null",
-                            cwd: cwd,
-                        });
+                let items: Item<ActionData>[] = [];
+                const enqueueSize2nd = 100000;
+                let enqueueSize = enqueueSize1st;
+                let numChunks = 0;
 
-                        try {
-                            for await (
-                                const line of abortable(
-                                    iterLine(proc.stdout),
-                                    abortController.signal,
-                                )
-                            ) {
-                                items.push(parse_line(line, cwd));
-                                if (items.length >= enqueueSize) {
-                                    numChunks++;
-                                    if (numChunks > 1) {
-                                        enqueueSize = enqueueSize2nd;
-                                    }
-                                    controller.enqueue(items);
-                                    items = [];
-                                }
+                const proc = Deno.run({
+                    cmd: cmd,
+                    stdout: "piped",
+                    stderr: "piped",
+                    stdin: "null",
+                    cwd: cwd,
+                });
+
+                try {
+                    for await (
+                        const line of abortable(
+                            iterLine(proc.stdout),
+                            abortController.signal,
+                        )
+                    ) {
+                        items.push(parse_line(line, cwd));
+                        if (items.length >= enqueueSize) {
+                            numChunks++;
+                            if (numChunks > 1) {
+                                enqueueSize = enqueueSize2nd;
                             }
-                            if (items.length) {
-                                controller.enqueue(items);
-                            }
-                        } catch (e: unknown) {
-                            if (e instanceof DOMException) {
-                                proc.kill("SIGTERM");
-                            } else {
-                                console.error(e);
-                            }
-                        } finally {
-                            const [status, stderr] = await Promise.all([
-                                proc.status(),
-                                proc.stderrOutput(),
-                            ]);
-                            proc.close();
-                            if (!status.success) {
-                                const mes = new TextDecoder().decode(stderr);
-                                if (!args.options.volatile || !mes.match(/regex parse error/)) {
-                                    console.error(mes);
-                                }
-                            }
-                            controller.close();
+                            controller.enqueue(items);
+                            items = [];
                         }
+                    }
+                    if (items.length) {
+                        controller.enqueue(items);
+                    }
+                } catch (e: unknown) {
+                    if (e instanceof DOMException) {
+                        proc.kill("SIGTERM");
+                    } else {
+                        console.error(e);
+                    }
+                } finally {
+                    const [status, stderr] = await Promise.all([
+                        proc.status(),
+                        proc.stderrOutput(),
+                    ]);
+                    proc.close();
+                    if (!status.success) {
+                        const mes = new TextDecoder().decode(stderr);
+                        if (!args.options.volatile || !mes.match(/regex parse error/)) {
+                            console.error(mes);
+                        }
+                    }
+                    controller.close();
+                }
             },
 
             cancel(reason): void {
@@ -130,7 +139,7 @@ export class Source extends BaseSource<Params> {
 
     params(): Params {
         return {
-            args: ["-d", "--result=ctags-mod"],
+            args: "-d",
             input: "",
             path: "",
         };
