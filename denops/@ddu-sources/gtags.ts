@@ -5,11 +5,12 @@ import {
     SourceOptions,
 } from "https://deno.land/x/ddu_vim@v3.4.3/types.ts";
 import { Denops, fn } from "https://deno.land/x/ddu_vim@v3.4.3/deps.ts";
+import { treePath2Filename } from "https://deno.land/x/ddu_vim@v3.4.3/utils.ts";
 import { ActionData } from "https://deno.land/x/ddu_kind_file@v0.5.3/file.ts";
-import { BufReader } from "https://deno.land/std@0.183.0/io/buffer.ts";
-import { join } from "https://deno.land/std@0.183.0/path/mod.ts";
-import { abortable } from "https://deno.land/std@0.183.0/async/mod.ts";
-import { TextLineStream } from "https://deno.land/std@0.183.0/streams/mod.ts";
+import { BufReader } from "https://deno.land/std@0.195.0/io/buffer.ts";
+import { resolve } from "https://deno.land/std@0.195.0/path/mod.ts";
+import { abortable } from "https://deno.land/std@0.195.0/async/mod.ts";
+import { TextLineStream } from "https://deno.land/std@0.195.0/streams/mod.ts";
 
 const enqueueSize1st = 1000;
 
@@ -59,7 +60,8 @@ export class Source extends BaseSource<Params> {
                 word: text,
                 display: line,
                 action: {
-                    path: join(cwd, path),
+//                    path: join(cwd, path),
+                    path: path ? resolve(cwd, path) : "",
                     lineNr,
                     text,
                 },
@@ -81,8 +83,8 @@ export class Source extends BaseSource<Params> {
                     ? ["global", args.sourceParams.args]
                     : ["global", "--result=ctags-mod", args.sourceParams.args, input];
 
-                const cwd = (args.sourceParams.path != "")
-                    ? args.sourceParams.path
+                const cwd = args.sourceOptions.path.length !== 0
+                    ? treePath2Filename(args.sourceOptions.path)
                     : await fn.getcwd(args.denops) as string;
 
                 let items: Item<ActionData>[] = [];
@@ -128,17 +130,15 @@ export class Source extends BaseSource<Params> {
                         console.error(e);
                     }
                 } finally {
-                   const status = await proc.status;
-                    if (!status.success) {
-                        for await (
-                            const mes of abortable(
-                                iterLine(proc.stderr),
-                                abortController.signal,
-                            )
-                        ) {
-                            console.error(mes);
-                        }
+                    for await (
+                        const mes of abortable(
+                            iterLine(proc.stderr),
+                            abortController.signal,
+                        )
+                    ) {
+                        console.error(mes);
                     }
+
                     controller.close();
                 }
             },
