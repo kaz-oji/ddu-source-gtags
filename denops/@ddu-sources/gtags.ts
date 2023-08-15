@@ -90,18 +90,21 @@ export class Source extends BaseSource<Params> {
                 let enqueueSize = enqueueSize1st;
                 let numChunks = 0;
 
-                const proc = Deno.run({
-                    cmd,
-                    stdout: "piped",
-                    stderr: "piped",
-                    stdin: "null",
-                    cwd,
-                });
+                const proc = new Deno.Command(
+                    cmd[0],
+                    {
+                        args: cmd.slice(1),
+                        stdout: "piped",
+                        stderr: "piped",
+                        stdin: "null",
+                        cwd,
+                    },
+                ).spawn();
 
                 try {
                     for await (
                         const line of abortable(
-                            iterLine(proc.stdout.readable),
+                            iterLine(proc.stdout),
                             abortController.signal,
                         )
                     ) {
@@ -125,16 +128,13 @@ export class Source extends BaseSource<Params> {
                         console.error(e);
                     }
                 } finally {
-                    const [status, stderr] = await Promise.all([
-                        proc.status(),
-                        proc.stderrOutput(),
-                    ]);
-                    proc.close();
+                   const status = await proc.status;
                     if (!status.success) {
-                        const mes = new TextDecoder().decode(stderr);
-                        if (
-                            mes.length > 0 && (!args.sourceOptions.volatile ||
-                                               !mes.match(/regex parse error/))
+                        for await (
+                            const mes of abortable(
+                                iterLine(proc.stderr),
+                                abortController.signal,
+                            )
                         ) {
                             console.error(mes);
                         }
